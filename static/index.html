@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vault RAG — Ask Your Notes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --surface3: #191c2a;
+      --border: #2e3250;
+      --accent: #7c6af5;
+      --accent-hover: #9488f8;
+      --accent-dim: rgba(124, 106, 245, 0.15);
+      --text: #e2e4f0;
+      --muted: #8b8fa8;
+      --error: #f87171;
+      --error-bg: rgba(248, 113, 113, 0.1);
+      --error-border: rgba(248, 113, 113, 0.35);
+      --success: #4ade80;
+      --success-bg: rgba(74, 222, 128, 0.08);
+      --success-border: rgba(74, 222, 128, 0.3);
+      --source-bg: #1e2235;
+      --history-user-bg: #22263a;
+      --history-bot-bg: #1a1d27;
+      --radius: 12px;
+      --font: 'Inter', system-ui, sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem 5rem;
+    }
+
+    /* ── Header ── */
+    header {
+      text-align: center;
+      margin-bottom: 1.75rem;
+      width: 100%;
+      max-width: 720px;
+    }
+
+    header h1 {
+      font-size: 1.9rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #a78bfa, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+
+    header p {
+      color: var(--muted);
+      margin-top: 0.35rem;
+      font-size: 0.9rem;
+    }
+
+    /* ── Sync bar ── */
+    .sync-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      width: 100%;
+      max-width: 720px;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    #sync-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.45rem 1rem;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      white-space: nowrap;
+    }
+
+    #sync-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent-hover);
+      background: var(--accent-dim);
+    }
+
+    #sync-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #sync-status {
+      font-size: 0.83rem;
+      color: var(--muted);
+      flex: 1;
+      min-width: 0;
+    }
+
+    #sync-status.success { color: var(--success); }
+    #sync-status.error   { color: var(--error); }
+
+    /* ── Main card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      width: 100%;
+      max-width: 720px;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.4);
+    }
+
+    /* ── Chat history ── */
+    #chat-history {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    #chat-history:empty { display: none; }
+
+    .history-entry {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      animation: fadeIn 0.25s ease;
+    }
+
+    .history-entry:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .history-q {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--accent-hover);
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+    }
+
+    .history-q::before {
+      content: "Q";
+      font-size: 0.7rem;
+      background: var(--accent-dim);
+      color: var(--accent-hover);
+      border-radius: 4px;
+      padding: 0.1rem 0.35rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .history-a {
+      font-size: 0.9rem;
+      line-height: 1.6;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+    }
+
+    .history-sources {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .history-source-chip {
+      background: var(--source-bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      padding: 0.2rem 0.6rem;
+    }
+
+    /* ── Input row ── */
+    .input-row {
+      display: flex;
+      gap: 0.65rem;
+    }
+
+    #question-input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 1rem;
+      padding: 0.65rem 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    #question-input:focus { border-color: var(--accent); }
+    #question-input::placeholder { color: var(--muted); }
+
+    #submit-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 0.95rem;
+      font-weight: 600;
+      padding: 0.65rem 1.4rem;
+      transition: background 0.2s, opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+
+    #submit-btn:hover:not(:disabled) {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+
+    #submit-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── Current answer (live area below input) ── */
+    #response-area {
+      margin-top: 1.25rem;
+      display: none;
+    }
+
+    #response-area.visible { display: block; }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin-bottom: 1.25rem;
+    }
+
+    /* Loading */
+    #loading {
+      display: none;
+      align-items: center;
+      gap: 0.6rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    #loading.visible { display: flex; }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Error */
+    #error-box {
+      display: none;
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      border-radius: 8px;
+      color: var(--error);
+      font-size: 0.9rem;
+      padding: 0.7rem 1rem;
+    }
+    #error-box.visible { display: block; }
+
+    /* Answer */
+    #answer-block { display: none; }
+    #answer-block.visible { display: block; }
+
+    .section-label {
+      font-size: 0.73rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 0.5rem;
+    }
+
+    #answer-text {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.97rem;
+      line-height: 1.65;
+      padding: 1rem 1.2rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Sources list */
+    #sources-block {
+      display: none;
+      margin-top: 1rem;
+    }
+    #sources-block.visible { display: block; }
+
+    #sources-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      margin-top: 0.5rem;
+    }
+
+    #sources-list li {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--source-bg);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--accent-hover);
+      font-size: 0.87rem;
+      padding: 0.4rem 0.85rem;
+    }
+
+    #sources-list li::before {
+      content: "📄";
+      font-size: 0.8rem;
+      flex-shrink: 0;
+    }
+
+    footer {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-top: 2rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📓 Vault RAG</h1>
+    <p>Ask questions answered from your Obsidian notes</p>
+  </header>
+
+  <!-- Sync bar — independent of the question input -->
+  <div class="sync-bar">
+    <button id="sync-btn" title="Incrementally sync your vault into the vector database">
+      ↻ Sync Vault
+    </button>
+    <span id="sync-status"></span>
+  </div>
+
+  <div class="card">
+    <!-- Chat history (populated by JS, hidden when empty) -->
+    <div id="chat-history"></div>
+
+    <!-- Question input -->
+    <div class="input-row">
+      <input
+        id="question-input"
+        type="text"
+        placeholder="What do your notes say about…?"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="submit-btn">Ask</button>
+    </div>
+
+    <!-- Live response area (current in-flight answer) -->
+    <div id="response-area">
+      <div class="divider" style="margin-top:1.25rem;"></div>
+
+      <div id="loading">
+        <div class="spinner"></div>
+        <span>Searching your notes…</span>
+      </div>
+
+      <div id="error-box"></div>
+
+      <div id="answer-block">
+        <div class="section-label">Answer</div>
+        <div id="answer-text"></div>
+      </div>
+
+      <div id="sources-block">
+        <div class="section-label">Sources</div>
+        <ul id="sources-list"></ul>
+      </div>
+    </div>
+  </div>
+
+  <footer>Vault RAG · Local Only · Your notes never leave your machine</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
