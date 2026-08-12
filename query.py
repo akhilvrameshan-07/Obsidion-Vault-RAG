@@ -1,7 +1,8 @@
+import re
 import os
 import sys
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Set
 
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
@@ -14,6 +15,62 @@ from llmProvider import LLMConfig, get_chat_model, generate_answer
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def extract_wikilinks(text: str) -> List[str]:
+    """Extract unique Obsidian [[WikiLink]] target note titles from text."""
+    pattern = r"\[\[([^\]\|#]+)(?:#[^\]\|]+)?(?:\|[^\]]+)?\]\]"
+    matches = re.findall(pattern, text)
+    seen: Set[str] = set()
+    result: List[str] = []
+    for match in matches:
+        cleaned = match.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            result.append(cleaned)
+    return result
+
+
+def expand_linked_documents(
+    db: Chroma, primary_results: List[Tuple[Document, float]], max_linked: int = 10
+) -> List[Tuple[Document, float]]:
+    """
+    Scan primary search results for [[WikiLinks]] and fetch the target notes
+    from Chroma. Appends resolved documents to the context list.
+    """
+    existing_titles = {doc.metadata.get("title", "") for doc, _ in primary_results}
+    linked_results: List[Tuple[Document, float]] = []
+
+    for doc, _score in primary_results:
+        parent_title = doc.metadata.get("title", "unknown")
+        links = extract_wikilinks(doc.page_content)
+
+        for link_target in links:
+            if link_target in existing_titles:
+                continue
+            existing_titles.add(link_target)
+
+            try:
+                found = db.get(where={"title": link_target})
+                if found and found.get("documents"):
+                    docs_list = found.get("documents", [])
+                    metas_list = found.get("metadatas", [])
+                    for c_text, c_meta in zip(docs_list, metas_list):
+                        meta_copy = dict(c_meta) if c_meta else {}
+                        meta_copy["via_link_from"] = parent_title
+                        linked_results.append((Document(page_content=c_text, metadata=meta_copy), 0.0))
+                        if len(linked_results) >= max_linked:
+                            break
+            except Exception as e:
+                logger.warning(f"Could not resolve linked note '{link_target}': {e}")
+
+            if len(linked_results) >= max_linked:
+                break
+
+    if linked_results:
+        logger.info(f"WikiLink resolution expanded search with {len(linked_results)} linked chunk(s).")
+
+    return primary_results + linked_results
 
 
 def load_env() -> Tuple[str, str, str, LLMConfig]:
@@ -47,12 +104,19 @@ def get_vector_store(db_dir: str, collection_name: str, embeddings) -> Chroma:
     return db
 
 
-def similarity_search(db: Chroma, query: str, k: int = 5) -> List[Tuple[Document, float]]:
-    """Query the vector database and return matching items with their distance metrics."""
+def similarity_search(
+    db: Chroma, query: str, k: int = 5, expand_links: bool = True
+) -> List[Tuple[Document, float]]:
+    """Query the vector database and return matching items with optional WikiLink expansion."""
     try:
         results = db.similarity_search_with_score(query, k=k)
         if not results:
             logger.info("No results returned from vector store.")
+            return []
+
+        if expand_links:
+            results = expand_linked_documents(db, results)
+
         return results
     except Exception as e:
         logger.error(f"Vector store query execution failed: {e}")
@@ -65,8 +129,15 @@ def build_prompt_messages(question: str, excerpts: List[Tuple[Document, float]])
     for doc, _score in excerpts:
         title = doc.metadata.get("title", "(untitled)")
         source = doc.metadata.get("source", "unknown")
+        via_link = doc.metadata.get("via_link_from")
         excerpt = doc.page_content.strip()
-        excerpt_texts.append(f"Title: {title} (Source: {source})\nExcerpt:\n{excerpt}")
+
+        if via_link:
+            header_info = f"Title: {title} (Source: {source}, Resolved via [[WikiLink]] from: {via_link})"
+        else:
+            header_info = f"Title: {title} (Source: {source})"
+
+        excerpt_texts.append(f"{header_info}\nExcerpt:\n{excerpt}")
 
     excerpts_block = "\n---\n".join(excerpt_texts)
 
