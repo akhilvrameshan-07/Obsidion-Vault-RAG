@@ -22,7 +22,7 @@ def load_env() -> Tuple[str, str, str, LLMConfig]:
 
     db_dir = os.getenv("DB_DIR", "./chroma_db")
     collection_name = os.getenv("COLLECTION_NAME", "vault_collection")
-    embedding_model = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    embedding_model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 
     llm_config = LLMConfig.load_from_env()
 
