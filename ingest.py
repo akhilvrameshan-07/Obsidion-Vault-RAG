@@ -80,7 +80,7 @@ class IndexerConfig:
             vault_path=vault,
             db_directory=os.getenv("DB_DIR", "./chroma_db"),
             collection_name=os.getenv("COLLECTION_NAME", "vault_collection"),
-            embedding_model=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+            embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"),
             batch_size=int(os.getenv("BATCH_SIZE", "100")),
             min_char_length=int(os.getenv("MIN_CHAR_LENGTH", "50")),
         )
@@ -144,6 +144,9 @@ class NoteParser:
                 ("#", "Header 1"),
                 ("##", "Header 2"),
                 ("###", "Header 3"),
+                ("####", "Header 4"),
+                ("#####", "Header 5"),
+                ("######", "Header 6"),
             ]
         )
 
@@ -190,11 +193,33 @@ class NoteParser:
             splits = [Document(page_content=body, metadata={})]
 
         chunks: List[Tuple[str, Document]] = []
+        header_mapping = [
+            ("Header 1", "#"),
+            ("Header 2", "##"),
+            ("Header 3", "###"),
+            ("Header 4", "####"),
+            ("Header 5", "#####"),
+            ("Header 6", "######"),
+        ]
+
         for idx, split in enumerate(splits):
             meta = base_metadata.copy()
             meta.update(split.metadata)
+
+            # Reconstruct exact Markdown header hierarchy (# Header 1, ## Header 2, etc.)
+            header_lines = []
+            for h_key, prefix in header_mapping:
+                if h_key in split.metadata and split.metadata[h_key]:
+                    header_lines.append(f"{prefix} {split.metadata[h_key]}")
+
+            if header_lines:
+                headers_block = "\n".join(header_lines)
+                content_with_header = f"{headers_block}\n\n{split.page_content}"
+            else:
+                content_with_header = split.page_content
+
             chunk_id = hashlib.sha256(f"{rel_path}_{idx}".encode()).hexdigest()
-            chunks.append((chunk_id, Document(page_content=split.page_content, metadata=meta)))
+            chunks.append((chunk_id, Document(page_content=content_with_header, metadata=meta)))
 
         return chunks
 
